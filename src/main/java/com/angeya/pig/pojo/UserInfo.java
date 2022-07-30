@@ -6,7 +6,7 @@ package com.angeya.pig.pojo;
  * @ Date: 2021/3/28
  */
 
-public class Person {
+public class UserInfo {
 
     private String name;
 

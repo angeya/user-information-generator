@@ -21,6 +21,5 @@ create table user
     age           smallint    not null comment '年龄',
     gender        tinyint     not null comment '性别',
     university_id int         null comment '大学id',
-    city_id       int         null comment '城市id',
-    new_column    int         null
+    city_id       int         null comment '城市id'
 );

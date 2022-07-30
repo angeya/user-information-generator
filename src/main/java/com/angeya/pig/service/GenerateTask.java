@@ -1,18 +1,17 @@
-package com.angeya.pig.task;
+package com.angeya.pig.service;
 
 import com.angeya.pig.dao.CityRepository;
 import com.angeya.pig.dao.UniversityRepository;
 import com.angeya.pig.dao.UserRepository;
 import com.angeya.pig.pojo.City;
-import com.angeya.pig.pojo.Person;
 import com.angeya.pig.pojo.University;
 import com.angeya.pig.pojo.User;
+import com.angeya.pig.pojo.UserInfo;
 import com.angeya.pig.util.Const;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 import javax.annotation.PostConstruct;
 import java.util.ArrayList;
 import java.util.List;
@@ -39,13 +38,12 @@ public class GenerateTask {
     @Autowired
     ExecutorService executorService;
 
-    // 缓存 <名称, id>
-    private static Map<String, University> universityCache = new ConcurrentHashMap<>();
-    private static Map<String, City> cityCache = new ConcurrentHashMap<String, City>();
+    private static final Map<String, University> UNIVERSITY_CACHE = new ConcurrentHashMap<>();
+    private static final Map<String, City> CITY_CACHE = new ConcurrentHashMap<>();
 
     private final Logger logger = LoggerFactory.getLogger(GenerateTask.class);
-    private final int THREAD_NUM = 5;
-    volatile private int REST_USER_NUM = 1000;
+    private static final int THREAD_NUM = 12;
+    volatile static private int REST_USER_NUM = 3_000_000;
 
     @PostConstruct
     public void start(){
@@ -75,26 +73,33 @@ public class GenerateTask {
         @Override
         public void run() {
             long dt = System.currentTimeMillis();
-            while (!isFinished()){
-                Person person = generatePerson();
-                savePerson(person);
-                synchronized (this) {
-                    logger.info("第 {} 条数据保存成功: {}", REST_USER_NUM, person);
+            while (!isNotFinished()){
+                UserInfo userInfo = generateUserInfo();
+                if (saveUserInfo(userInfo)) {
+                    logger.info("{} 保存成功！", userInfo);
+                } else {
+                    logger.warn("{} 保存失败！", userInfo);
                 }
             }
-            logger.info("线程: {}, 耗时: {}", Thread.currentThread().getName(), System.currentTimeMillis() - dt);
         }
 
-        private Person generatePerson() {
-            Person person = new Person();
-            person.setName(createName());
-            person.setAge((short)(random.nextInt(42) + 20));
-            person.setCity(getRandomProperty(Const.CITY));
-            person.setGender((byte)random.nextInt(2));
-            person.setUniversity(getRandomProperty(Const.UNIVERSITY));
-            return person;
+        /**
+         * 生成用户信息
+         * @return 用户信息
+         */
+        private UserInfo generateUserInfo() {
+            UserInfo userInfo = new UserInfo();
+            userInfo.setName(createName());
+            userInfo.setAge((short)(random.nextInt(42) + 20));
+            userInfo.setCity(getRandomProperty(Const.CITY));
+            userInfo.setGender((byte)random.nextInt(2));
+            userInfo.setUniversity(getRandomProperty(Const.UNIVERSITY));
+            return userInfo;
         }
-
+        /**
+         * 创建名字 = 姓 + （1-2 个字）
+         * @return 姓名
+         */
         private String createName() {
             String familyName = getRandomProperty(Const.FAMILY_NAME);
             StringBuilder fullName = new StringBuilder(familyName);
@@ -106,49 +111,59 @@ public class GenerateTask {
             return fullName.toString();
         }
 
+        /**
+         * 随机获取数组中的选项
+         * @param array 字符串数组
+         * @return 随机字符串
+         */
         private String getRandomProperty(String[] array){
             return array[random.nextInt(array.length)];
         }
 
-        @Transactional
-        private boolean savePerson(Person person) {
+        /**
+         * 保存用户信息
+         * @param userInfo 用户信息
+         */
+        private boolean saveUserInfo(UserInfo userInfo) {
             University university;
             City city;
-            if (universityCache.containsKey(person.getUniversity())) {
-                university = universityCache.get(person.getUniversity());
+            if (UNIVERSITY_CACHE.containsKey(userInfo.getUniversity())) {
+                university = UNIVERSITY_CACHE.get(userInfo.getUniversity());
             } else {
-                university = universityRepository.save(new University(person.getUniversity()));
-                universityCache.put(university.getName(), university);
+                university = universityRepository.save(new University(userInfo.getUniversity()));
+                UNIVERSITY_CACHE.put(university.getName(), university);
             }
-            if (cityCache.containsKey(person.getCity())) {
-                city = cityCache.get(person.getCity());
+            if (CITY_CACHE.containsKey(userInfo.getCity())) {
+                city = CITY_CACHE.get(userInfo.getCity());
             } else {
-                city = cityRepository.save(new City(person.getCity()));
-                cityCache.put(city.getName(), city);
+                city = cityRepository.save(new City(userInfo.getCity()));
+                CITY_CACHE.put(city.getName(), city);
             }
-            userRepository.save(new User(person.getName(), person.getGender(), person.getAge(), university.getId(), city.getId()));
-            return true;
-        }
-
-        private boolean saveUser(Person person) {
-            return true;
+            if (university != null && city != null) {
+                userRepository.save(new User(userInfo.getName(), userInfo.getGender(), userInfo.getAge(), university.getId(), city.getId()));
+                return true;
+            }
+            return false;
         }
     }
-
+    /**
+     * 初始化大学和城市缓存
+     */
     private void initCache(){
         List<University> universityList = universityRepository.findAll();
         for (University university : universityList) {
-            universityCache.put(university.getName(), university);
+            UNIVERSITY_CACHE.put(university.getName(), university);
         }
 
         List<City> cityList = cityRepository.findAll();
         for (City city : cityList) {
-            cityCache.put(city.getName(), city);
+            CITY_CACHE.put(city.getName(), city);
         }
     }
 
-    private synchronized boolean isFinished() {
+    private synchronized boolean isNotFinished() {
         if (REST_USER_NUM > 0) {
+            logger.info("正在保存倒数第 {} 条数据", REST_USER_NUM);
             REST_USER_NUM --;
             return false;
         }
